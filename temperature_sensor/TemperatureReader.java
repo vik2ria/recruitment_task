@@ -10,7 +10,9 @@ import java.net.MalformedURLException;
 import java.net.URL;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.Scanner;
+import org.json.*;
 
 public class TemperatureReader {
 
@@ -32,7 +34,7 @@ public class TemperatureReader {
         return temperaturIncelsius;
     }
 
-    private static void postJSONToApi(String jsonStringWithTemp) {
+    private static void postJSONToApi(JSONObject jsonTempObject) {
         try {
             URL successfulTempReading = new URL("http://localhost:5001/api/temperature");
             HttpURLConnection apiCon = (HttpURLConnection)successfulTempReading.openConnection();
@@ -43,6 +45,7 @@ public class TemperatureReader {
             apiCon.setDoOutput(true);
 
             try(OutputStream outputStream = apiCon.getOutputStream()) {
+                String jsonStringWithTemp = jsonTempObject.toString();
                 byte[] input = jsonStringWithTemp.getBytes("utf-8");
                 outputStream.write(input, 0, input.length);
             }
@@ -66,11 +69,6 @@ public class TemperatureReader {
             e.printStackTrace();
         }
     }
-
-    private static void temperatureLastTwoMinutes() {
-
-    }
-
 
     public static void getTemperature() {
         try {
@@ -104,12 +102,21 @@ public class TemperatureReader {
                     LocalDateTime currentDateTime = LocalDateTime.now().withNano(0);
 
                     if(endTimeOfReadingOfValues.equals(currentDateTime)) {
+                        // calculate avg temperature
                         avgTemperature = avgTemperature / valueCounter;
-                        String temperatureInJSON = "{time:{start:" + startTimeOfReadingOfValues +
-                        ", end:" + endTimeOfReadingOfValues +
-                        "}, min:" + minTemperature +", max:" + maxTemperature + ", avg:" + avgTemperature +"}";
 
-                        postJSONToApi(temperatureInJSON);
+                        //hashmap to give to JSONObject
+                        HashMap<String, LocalDateTime> startAndEnTime = new HashMap<>();
+                        startAndEnTime.put("start", startTimeOfReadingOfValues);
+                        startAndEnTime.put("end", endTimeOfReadingOfValues);
+                        //JSONObject
+                        JSONObject jsonTemperatureReading = new JSONObject();
+                        jsonTemperatureReading.put("time", startAndEnTime);
+                        jsonTemperatureReading.put("min", minTemperature);
+                        jsonTemperatureReading.put("max", maxTemperature);
+                        jsonTemperatureReading.put("avg", avgTemperature);
+
+                        postJSONToApi(jsonTemperatureReading);
 
                         System.out.println("min: " + minTemperature + "max: " + maxTemperature + "avg: " + roundingDouble(avgTemperature));
                         
@@ -141,7 +148,7 @@ public class TemperatureReader {
                    
                     Thread.sleep(100); 
                     
-                 } catch (InterruptedException e) {
+                 } catch (InterruptedException | JSONException e) {
                     // TODO: handle exception
                     }
                
