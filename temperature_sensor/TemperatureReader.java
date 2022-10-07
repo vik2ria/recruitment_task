@@ -9,10 +9,7 @@ import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Scanner;
-import org.json.*;
 
 public class TemperatureReader {
 
@@ -34,9 +31,9 @@ public class TemperatureReader {
         return temperaturIncelsius;
     }
 
-    private static void postJSONToApi(JSONObject jsonTempObject) {
+    private static void postJSONToApi(String jsonStringWithTemp) {
         try {
-            URL successfulTempReading = new URL("http://localhost:5001/api/temperature");
+            URL successfulTempReading = new URL("http://localhost:5000/api/temperature");
             HttpURLConnection apiCon = (HttpURLConnection)successfulTempReading.openConnection();
 
             apiCon.setRequestMethod("POST");
@@ -45,12 +42,15 @@ public class TemperatureReader {
             apiCon.setDoOutput(true);
 
             try(OutputStream outputStream = apiCon.getOutputStream()) {
-                String jsonStringWithTemp = jsonTempObject.toString();
-                byte[] input = jsonStringWithTemp.getBytes("utf-8");
-                outputStream.write(input, 0, input.length);
+                outputStream.write(jsonStringWithTemp.getBytes());
+                outputStream.flush();
+                outputStream.close();
+        
             }
 
-            try(BufferedReader br = new BufferedReader(new InputStreamReader(apiCon.getInputStream(), "utf-8"))){
+            int responseCode = apiCon.getResponseCode();
+            System.out.println(responseCode);
+            /*try(BufferedReader br = new BufferedReader(new InputStreamReader(apiCon.getInputStream(), "utf-8"))){
                 StringBuilder response = new StringBuilder();
                 String responseLine = null;
                 while((responseLine = br.readLine()) != null) {
@@ -58,7 +58,7 @@ public class TemperatureReader {
                 }
                 System.out.println(response.toString());
                 
-            }
+            }*/
 
 
         } catch (MalformedURLException e) {
@@ -102,21 +102,12 @@ public class TemperatureReader {
                     LocalDateTime currentDateTime = LocalDateTime.now().withNano(0);
 
                     if(endTimeOfReadingOfValues.equals(currentDateTime)) {
-                        // calculate avg temperature
                         avgTemperature = avgTemperature / valueCounter;
+                        String temperatureInJSON = "{\"time\":{\"start\":" + startTimeOfReadingOfValues +
+                        ", \"end\":" + endTimeOfReadingOfValues +
+                        "}, \"min\":" + minTemperature +", \"max\":" + maxTemperature + ", \"average\":" + avgTemperature +"}";
 
-                        //hashmap to give to JSONObject
-                        HashMap<String, LocalDateTime> startAndEnTime = new HashMap<>();
-                        startAndEnTime.put("start", startTimeOfReadingOfValues);
-                        startAndEnTime.put("end", endTimeOfReadingOfValues);
-                        //JSONObject
-                        JSONObject jsonTemperatureReading = new JSONObject();
-                        jsonTemperatureReading.put("time", startAndEnTime);
-                        jsonTemperatureReading.put("min", minTemperature);
-                        jsonTemperatureReading.put("max", maxTemperature);
-                        jsonTemperatureReading.put("avg", avgTemperature);
-
-                        postJSONToApi(jsonTemperatureReading);
+                        postJSONToApi(temperatureInJSON);
 
                         System.out.println("min: " + minTemperature + "max: " + maxTemperature + "avg: " + roundingDouble(avgTemperature));
                         
@@ -148,7 +139,7 @@ public class TemperatureReader {
                    
                     Thread.sleep(100); 
                     
-                 } catch (InterruptedException | JSONException e) {
+                 } catch (InterruptedException e) {
                     // TODO: handle exception
                     }
                
