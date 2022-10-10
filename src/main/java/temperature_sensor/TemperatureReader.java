@@ -1,20 +1,23 @@
 package temperature_sensor;
-import java.io.BufferedReader;
+
+
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
-import java.net.MalformedURLException;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Scanner;
+
+// jar downloaded from: https://search.maven.org/artifact/org.json/json/20220924/bundle
 import org.json.*;
 
+
 public class TemperatureReader {
+
 
     private static double roundingDouble(Double doubleValueToRound) {
         double returnValue = Math.round(doubleValueToRound) /100.0;
@@ -22,62 +25,93 @@ public class TemperatureReader {
     }
 
     private static double convertADCToCelsius(double adcValue) {
-        //rougly 41.39 messured in ADC per Celsius
+        //roughly 41.39 measured in ADC per Celsius
         double adcPerCelsius = 41.39;
         //baseline 0C = 2048
         double baselineCelsius = 2048.00;
-        double temperaturIncelsius;
+        double temperatureInCelsius;
 
         //Calculating the conversion and rounding to two decimals
-        temperaturIncelsius = roundingDouble(((adcValue - baselineCelsius) / adcPerCelsius));
+        temperatureInCelsius = roundingDouble(((adcValue - baselineCelsius) / adcPerCelsius));
 
-        return temperaturIncelsius;
+        return temperatureInCelsius;
     }
 
-    private static void postJSONToApi(JSONObject jsonTempObject) {
-        try {
-            URL successfulTempReading = new URL("http://localhost:5000/api/temperature");
-            HttpURLConnection apiCon = (HttpURLConnection)successfulTempReading.openConnection();
+    private static int postJSONToApi(JSONObject jsonTempObject, JSONArray failureToConnectArray, int lastPOSTStatusFlag) {
+        if(lastPOSTStatusFlag == 0){
+            try {
+                URL successfulTempReading = new URL("http://localhost:5000/api/temperature");
+                HttpURLConnection apiCon = (HttpURLConnection)successfulTempReading.openConnection();
 
-            apiCon.setRequestMethod("POST");
-            apiCon.setRequestProperty("Content-type", "application/json");
-            apiCon.setRequestProperty("Accept", "application/json");
-            apiCon.setDoOutput(true);
+                apiCon.setRequestMethod("POST");
+                apiCon.setRequestProperty("Content-type", "application/json");
+                apiCon.setRequestProperty("Accept", "application/json");
+                apiCon.setDoOutput(true);
 
-            try(OutputStream outputStream = apiCon.getOutputStream()) {
-                String jsonStringWithTemp = jsonTempObject.toString();
-                byte[] input = jsonStringWithTemp.getBytes("utf-8");
-                outputStream.write(input, 0, input.length);
-            }
-
-            try(BufferedReader br = new BufferedReader(new InputStreamReader(apiCon.getInputStream(), "utf-8"))){
-                StringBuilder response = new StringBuilder();
-                String responseLine = null;
-                while((responseLine = br.readLine()) != null) {
-                    response.append(responseLine.trim());
+                try(OutputStream outputStream = apiCon.getOutputStream()) {
+                    String jsonStringWithTemp = jsonTempObject.toString();
+                    byte[] input = jsonStringWithTemp.getBytes(StandardCharsets.UTF_8);
+                    outputStream.write(input, 0, input.length);
                 }
-                System.out.println(response.toString());
 
+                int responseCode = apiCon.getResponseCode();
+
+                if(responseCode == HttpURLConnection.HTTP_OK) {
+                    System.out.println("Målingen er lagret");
+                } else if (responseCode == 500) {
+                    failureToConnectArray.put(jsonTempObject);
+                    lastPOSTStatusFlag = 1;
+                    System.out.println("Målingen ble ikke lagret, sendes sammen med neste intervall");
+                }
+
+
+
+        }catch (IOException e) {
+                // TODO Auto-generated catch block
+                e.printStackTrace();
             }
+        } else if(lastPOSTStatusFlag == 1) {
+            try{
+                failureToConnectArray.put(jsonTempObject);
+                URL failedTempReading = new URL("http://localhost:5000/api/temperature/missing");
+                HttpURLConnection apiMissingCon = (HttpURLConnection)failedTempReading.openConnection();
 
+                apiMissingCon.setRequestMethod("POST");
+                apiMissingCon.setRequestProperty("Content-type", "application/json");
+                apiMissingCon.setRequestProperty("Accept", "application/json");
+                apiMissingCon.setDoOutput(true);
 
-        } catch (MalformedURLException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
-        } catch (IOException e) {
-            // TODO Auto-generated catch block
-            e.printStackTrace();
+                try(OutputStream outputStream = apiMissingCon.getOutputStream()) {
+                    String jsonStringWithTemp = failureToConnectArray.toString();
+                    byte[] input = jsonStringWithTemp.getBytes(StandardCharsets.UTF_8);
+                    outputStream.write(input, 0, input.length);
+                }
+                int responseFromMissingPOST = apiMissingCon.getResponseCode();
+                if(responseFromMissingPOST == HttpURLConnection.HTTP_OK){
+                    lastPOSTStatusFlag = 0;
+                    System.out.println("målingen ble sendt til missing");
+                } else if(responseFromMissingPOST== 400) {
+                    failureToConnectArray.iterator().forEachRemaining(System.out::println);
+                }
+
+            } catch (IOException e){
+                e.printStackTrace();
+            }
         }
+
+        return lastPOSTStatusFlag;
     }
 
     public static void getTemperature() {
+        JSONArray failedPOSTArray = new JSONArray();
+        int lastPOSTStatusFlag = 0;
         try {
             File measuredTemperature = new File("src/main/java/temperature_sensor/temperature.txt");
             Scanner readMeasuredTemperature = new Scanner(measuredTemperature);
 
             LocalDateTime startTimeOfReadingOfValues = LocalDateTime.now().withNano(0);
             // TODO: change to 2min
-            LocalDateTime endTimeOfReadingOfValues = startTimeOfReadingOfValues.plusSeconds(30);
+            LocalDateTime endTimeOfReadingOfValues = startTimeOfReadingOfValues.plusSeconds(10);
 
             // set the variables to be a value that is unlikely to get passed from the sensore
             double minTemperature = 5000;
@@ -92,7 +126,7 @@ public class TemperatureReader {
                 try {
 
                     String stringValueFromADC = readMeasuredTemperature.nextLine();
-                    double doubleValueFromADC = Double.valueOf(stringValueFromADC);
+                    double doubleValueFromADC = Double.parseDouble(stringValueFromADC);
                     double doubleValueInCelsius = convertADCToCelsius(doubleValueFromADC);
 
                     valueCounter ++;
@@ -103,7 +137,7 @@ public class TemperatureReader {
 
                     if(endTimeOfReadingOfValues.equals(currentDateTime)) {
                         // calculate avg temperature
-                        avgTemperature = avgTemperature / valueCounter;
+                        avgTemperature = roundingDouble(avgTemperature / valueCounter);
 
                         //hashmap to give to JSONObject
                         HashMap<String, LocalDateTime> startAndEnTime = new HashMap<>();
@@ -116,9 +150,7 @@ public class TemperatureReader {
                         jsonTemperatureReading.put("max", maxTemperature);
                         jsonTemperatureReading.put("avg", avgTemperature);
 
-                        postJSONToApi(jsonTemperatureReading);
-
-                        System.out.println("min: " + minTemperature + "max: " + maxTemperature + "avg: " + roundingDouble(avgTemperature));
+                        lastPOSTStatusFlag = postJSONToApi(jsonTemperatureReading, failedPOSTArray, lastPOSTStatusFlag);
 
                         //Reset variables
                         minTemperature = 5000;
@@ -129,7 +161,7 @@ public class TemperatureReader {
                         //set start and end time for next interval
                         startTimeOfReadingOfValues = LocalDateTime.now().withNano(0);
                         // TODO: change to min
-                        endTimeOfReadingOfValues = startTimeOfReadingOfValues.plusSeconds(30);
+                        endTimeOfReadingOfValues = startTimeOfReadingOfValues.plusSeconds(10);
                     }
 
                     if(minTemperature == 5000 && maxTemperature == 5000) {
